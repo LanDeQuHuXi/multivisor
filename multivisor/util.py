@@ -52,3 +52,16 @@ def load_config(config_file):
         supervisors[name] = Supervisor(name, url)
     return config
 
+
+def parse_str(value):
+    if isinstance(value, bytes):
+        return value.decode('utf-8')
+    return value
+
+
+def parse_dict_str(obj):
+    if not isinstance(obj, dict):
+        print('not a dict')
+        return obj
+
+    return {parse_str(key): parse_str(value) for key, value in obj.items()}
