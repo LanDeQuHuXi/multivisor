@@ -7,6 +7,7 @@ Vue.use(Vuex)
 export default new Vuex.Store({
   state: {
     multivisor: multivisor.nullMultivisor,
+    error: '',
     notifications: [],
     selectedProcesses: [],
     search: '',
@@ -18,7 +19,9 @@ export default new Vuex.Store({
     processDetails: {
       process: multivisor.nullProcess,
       visible: false
-    }
+    },
+    isAuthenticated: undefined,
+    useAuthentication: undefined
   },
   mutations: {
     updateMultivisor (state, multivisor) {
@@ -59,24 +62,41 @@ export default new Vuex.Store({
     },
     setProcessDetails (state, details) {
       state.processDetails = details
+    },
+    setIsAuthenticated (state, isAuthenticated) {
+      state.isAuthenticated = isAuthenticated
+    },
+    setUseAuthentication (state, useAuthentication) {
+      state.useAuthentication = useAuthentication
+    },
+    logout (state) {
+      state.isAuthenticated = false
+    },
+    setError (state, error) {
+      state.error = error
     }
   },
   actions: {
-    init ({ commit }) {
-      multivisor.load()
-        .then((data) => {
-          commit('updateMultivisor', data)
-          const eventHandler = (event) => {
-            if (event.event === 'process_changed') {
-              commit('updateProcess', event.payload)
-            } else if (event.event === 'supervisor_changed') {
-              commit('updateSupervisor', event.payload)
-            } else if (event.event === 'notification') {
-              commit('newNotification', event.payload)
-            }
-          }
-          multivisor.streamTo(eventHandler)
-        })
+    async init ({ commit }) {
+      const response = await multivisor.load()
+      if (response.status === 401) {
+        return
+      } else if (response.status === 504) {  // server down
+        commit('setError', 'Couldn\'t connect to multivisor server, make sure it is running')
+      } else {
+        const data = await response.json()
+        commit('updateMultivisor', data)
+      }
+      const eventHandler = (event) => {
+        if (event.event === 'process_changed') {
+          commit('updateProcess', event.payload)
+        } else if (event.event === 'supervisor_changed') {
+          commit('updateSupervisor', event.payload)
+        } else if (event.event === 'notification') {
+          commit('newNotification', event.payload)
+        }
+      }
+      multivisor.streamTo(eventHandler)
     },
     restartProcesses (context, uids) {
       multivisor.processAction(uids, 'restart')
@@ -105,6 +125,10 @@ export default new Vuex.Store({
     },
     restartSupervisor (context, uid) {
       multivisor.supervisorAction(uid, 'restart')
+    },
+    logout () {
+      this.commit('logout')
+      fetch('/api/logout', {method: 'POST'})
     }
   },
   getters: {
