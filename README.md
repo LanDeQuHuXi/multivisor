@@ -1,4 +1,5 @@
 # Multivisor
+[![Build Status](https://travis-ci.org/guy881/multivisor.svg?branch=develop)](https://travis-ci.org/guy881/multivisor)
 
 A centralized supervisor UI (Web & CLI)
 
@@ -132,6 +133,24 @@ url=daffyduck.acme.org:9007
 Of course the multivisor itself can be configured in supervisor as a normal
 program.
 
+### Authentication
+To protect multivisor from unwanted access, you can enable required authentication.
+Specify `username` and `password` parameters in `global` section of your configuration file e.g.:
+```bash
+[global]
+username=test
+password=test
+```
+You can also specify `password` as SHA-1 hash in hex, with `{SHA}` prefix: e.g.
+`{SHA}a94a8fe5ccb19ba61c4c0873d391e987982fbbd3` (example hash is `test` in SHA-1).
+
+In order to use authentication, you also need to set `MULTIVISOR_SECRET_KEY` environmental variable,
+as flask sessions module needs some secret value to create secure session.
+You can generate some random hash easily using python:
+`python -c 'import os; import binascii; print(binascii.hexlify(os.urandom(32)))'`
+
+Remember to restart the server after changes in configuration file.
+
 ## Build & Install
 
 ```bash
@@ -164,7 +183,7 @@ development cycle:
 First, start multivisor (which listens on 22000 by default):
 
 ```bash
-python -m multivisor.server -c multivisor.conf
+python -m multivisor.server.web -c multivisor.conf
 ```
 
 Now, in another console, run the webpack dev server (it will
