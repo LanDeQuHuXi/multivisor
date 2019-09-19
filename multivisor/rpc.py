@@ -9,27 +9,27 @@ advantages: it avoids creating an eventlistener process just to forward events.
 The python environment where supervisor runs must have multivisor installed
 """
 
+import functools
+import logging
 import os
 import queue
-import logging
-import functools
 import threading
 
 from gevent import spawn, hub, sleep
 from gevent.queue import Queue
-from zerorpc import stream, Server, LostRemote
-
+from six import text_type
+from supervisor.events import subscribe, Event, getEventNameByType
 from supervisor.http import NOT_DONE_YET
 from supervisor.rpcinterface import SupervisorNamespaceRPCInterface
-from supervisor.events import subscribe, Event, getEventNameByType
+from zerorpc import stream, Server, LostRemote
+
 # unsubscribe only appears in supervisor > 3.3.4
 try:
     from supervisor.events import unsubscribe
 except:
     unsubscribe = lambda x, y: None
 
-from .util import sanitize_url
-
+from .util import sanitize_url, parse_dict_str
 
 DEFAULT_BIND = 'tcp://*:9002'
 
@@ -111,15 +111,19 @@ class MultivisorNamespaceRPCInterface(SupervisorNamespaceRPCInterface):
             # old supervisor version
             payload_str = event.payload()
         except AttributeError:
-            payload_str = str(event)
+            payload_str = text_type(event)
         payload = dict((x.split(':') for x in payload_str.split()))
         if event_name.startswith('PROCESS_STATE'):
             pname = "{}:{}".format(payload['groupname'], payload['processname'])
-            payload['process'] = self.getProcessInfo(pname)
+            payload[u'process'] = parse_dict_str(self.getProcessInfo(pname))
         # broadcast the event to clients
         server = self.supervisord.options.identifier
-        new_event = dict(pool='multivisor', server=server,
-                         eventname=event_name, payload=payload)
+        new_event = {
+            u'pool': u'multivisor',
+            u'server': text_type(server),
+            u'eventname': text_type(event_name),
+            u'payload': payload
+        }
         for channel in self._event_channels:
             channel.put(new_event)
         if stop_event:
@@ -162,6 +166,7 @@ class MultivisorNamespaceRPCInterface(SupervisorNamespaceRPCInterface):
                 if event is None:
                     self._log.info('stop: closing client')
                     return
+                # self._log.info(event)
                 yield event
         except LostRemote as e:
             self._log.info('remote end of stream disconnected')

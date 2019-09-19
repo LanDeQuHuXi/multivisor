@@ -1,24 +1,19 @@
-from __future__ import print_function
-from __future__ import unicode_literals
-
-import re
 import fnmatch
-import datetime
 import functools
 
 import maya
-import louie
+from blinker import signal
 from prompt_toolkit import PromptSession, HTML, print_formatted_text
-from prompt_toolkit.styles import Style
-from prompt_toolkit.history import InMemoryHistory
-from prompt_toolkit.completion import WordCompleter
-from prompt_toolkit.validation import ValidationError
 from prompt_toolkit.application import run_in_terminal
-from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.styles import Style
+from prompt_toolkit.validation import ValidationError
 
+from multivisor.signals import SIGNALS
 from . import util
-
 
 STYLE = Style.from_dict({
     'stopped': 'ansired',
@@ -38,6 +33,7 @@ NOTIF_STYLE = {
   'ERROR': 'red'
 }
 
+
 def process_description(process):
     # TODO
     status = process['statename']
@@ -56,9 +52,9 @@ def process_description(process):
 
 def process_status(process, max_puid_len=10, group_by='group'):
     state = process['statename']
-    uid = '{{uid:{}}}'.format(max_puid_len).format(uid=process['uid'])
+    uid = u'{{uid:{}}}'.format(max_puid_len).format(uid=process['uid'])
     desc = process_description(process)
-    text = '{p}{uid} <{lstate}>{state:8}</{lstate}> {description}' \
+    text = u'{p}{uid} <{lstate}>{state:8}</{lstate}> {description}' \
            .format(p=('' if group_by in (None, 'process') else '  '),
                    uid=uid, state=state, lstate=state.lower(),
                    description=desc)
@@ -67,7 +63,7 @@ def process_status(process, max_puid_len=10, group_by='group'):
 
 def processes_status(status, group_by='group', filter='*'):
     filt = lambda p: fnmatch.fnmatch(p['uid'], filter)
-    return util.processes_status(status, group_by=group_by, filter=filt,
+    return util.processes_status(status, group_by=group_by, process_filter=filt,
                                  process_status=process_status)
 
 
@@ -82,7 +78,8 @@ def print_processes_status(status, *args):
 def cmd(f=None, name=None):
     if f is None:
         return functools.partial(cmd, name=name)
-    f.__cmd__ = (name or f.__name__).decode()
+    name = name or f.__name__
+    f.__cmd__ = name.decode() if isinstance(name, bytes) else name
     return f
 
 
@@ -136,7 +133,7 @@ class Commands(object):
         cmd = self.get_command(args[0])
         cmds = '  '.join(self.get_commands())
         raw_text = cmd.__doc__.format(cmds=cmds)
-        text = '\n'.join(map(unicode.strip, raw_text.split('\n')))
+        text = '\n'.join(map(str.strip, raw_text.split('\n')))
         print_formatted_text(text)
 
     @classmethod
@@ -159,7 +156,7 @@ class Commands(object):
 def Prompt(**kwargs):
     history = InMemoryHistory()
     auto_suggest = AutoSuggestFromHistory()
-    prmpt = 'multivisor> '
+    prmpt = u'multivisor> '
     return PromptSession(prmpt, history=history, auto_suggest=auto_suggest,
                          **kwargs)
 
@@ -179,9 +176,10 @@ class Repl(object):
                               key_bindings=self.keys)
         self.session.app.commands = self.commands
         self.__update_toolbar()
-        louie.connect(self.__update_toolbar, sender=self.multivisor)
+        for signal_name in SIGNALS:
+            signal(signal_name).connect(self.__update_toolbar)
 
-    def __update_toolbar(self):
+    def __update_toolbar(self, *args, **kwargs):
         status = self.multivisor.status
         stats = status['stats']
         s_stats, p_stats = stats['supervisors'], stats['processes']
@@ -190,22 +188,22 @@ class Repl(object):
             notif = notifications[-1]
         else:
             notif = dict(level='INFO', message='Welcome to multivisor CLI')
-        html = '{name} | Supervisors: {s[total]} (' \
-               '<b><style bg="green">{s[running]}</style></b>/' \
-               '<b><style bg="red">{s[stopped]}</style></b>) ' \
-               '| Processes: {p[total]} (' \
-               '<b><style bg="green">{p[running]}</style></b>/' \
-               '<b><style bg="red">{p[stopped]}</style></b>) ' \
-               '| <style bg="{notif_color}">{notif_msg}</style>' \
+        html = u'{name} | Supervisors: {s[total]} (' \
+               u'<b><style bg="green">{s[running]}</style></b>/' \
+               u'<b><style bg="red">{s[stopped]}</style></b>) ' \
+               u'| Processes: {p[total]} (' \
+               u'<b><style bg="green">{p[running]}</style></b>/' \
+               u'<b><style bg="red">{p[stopped]}</style></b>) ' \
+               u'| <style bg="{notif_color}">{notif_msg}</style>' \
                .format(name=status['name'], s=s_stats, p=p_stats,
                        notif_color=NOTIF_STYLE[notif['level']],
                        notif_msg=notif['message'])
         self.__toolbar = HTML(html)
         self.session.app.invalidate()
 
-    @keys.add('f5')
-    def __on_refresh(event):
-        run_in_terminal(event.app.commands.refresh_status())
+    @keys.add(u'f5')
+    def __on_refresh(self):
+        run_in_terminal(self.app.commands.refresh_status())
 
     def parse_command_line(self, text):
         args = text.split()
@@ -219,7 +217,7 @@ class Repl(object):
         except KeyboardInterrupt:
             raise
         except Exception as err:
-            print_formatted_text(HTML('<red>Error:</red> {}'.format(err)))
+            print_formatted_text(HTML(u'<red>Error:</red> {}'.format(err)))
 
     def toolbar(self):
         return self.__toolbar

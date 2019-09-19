@@ -1,21 +1,45 @@
 #!/usr/bin/env python
 import copy
-import os
-import json
-import time
 import logging
+import os
+import time
 import weakref
-from ConfigParser import SafeConfigParser
 
-import louie
+from blinker import signal
+
+try:
+    from ConfigParser import SafeConfigParser
+except ImportError:
+    from configparser import SafeConfigParser
+
 import zerorpc
-from gevent import queue, spawn, sleep, joinall
+from gevent import spawn, sleep, joinall
 from supervisor.xmlrpc import Faults
 from supervisor.states import RUNNING_STATES
 
-from .util import sanitize_url, filter_patterns
+from .util import sanitize_url, filter_patterns, parse_dict_str
 
 log = logging.getLogger('multivisor')
+
+
+class ClientMiddleware(object):
+    """
+    zerorpc middleware to decode received bytes to unicode,
+    in case when one of the supervisors is running on python 2
+    and multivisor is running on python 3, client is receiving bytes instead of str
+    https://github.com/tiagocoutinho/multivisor/issues/31
+    """
+
+    def client_after_request(self, request_event, reply_event, exception=None):
+        if not exception and reply_event:
+            data = reply_event.args
+            if data and len(data):
+                data = data[0]
+                if isinstance(data, list):
+                    data = [parse_dict_str(value) for value in data]
+                else:
+                    data = parse_dict_str(data)
+                reply_event._args = (data,)
 
 
 class Supervisor(dict):
@@ -38,7 +62,9 @@ class Supervisor(dict):
         addr = sanitize_url(url, protocol='tcp', host=name, port=9002)
         self.address = addr['url']
         self.host = self['host'] = addr['host']
-        self.server = zerorpc.Client(self.address)
+        context = zerorpc.Context()
+        context.register_middleware(ClientMiddleware())
+        self.server = zerorpc.Client(self.address, context=context)
         # fill supervisor info before events start coming in
         self.event_loop = spawn(self.run)
 
@@ -49,7 +75,7 @@ class Supervisor(dict):
         this, other = dict(self), dict(other)
         this_p = this.pop('processes')
         other_p = other.pop('processes')
-        return this == other and this_p.keys() == other_p.keys()
+        return this == other and list(this_p.keys()) == list(other_p.keys())
 
     def run(self):
         last_retry = time.time()
@@ -97,13 +123,14 @@ class Supervisor(dict):
     def read_info(self):
         info = self.create_base_info()
         server = self.server
-        info['pid']= pid = server.getPID()
+        info['pid'] = server.getPID()
         info['running'] = True
         info['identification'] = server.getIdentification()
         info['api_version'] = server.getAPIVersion()
         info['supervisor_version'] = server.getSupervisorVersion()
         info['processes'] = processes = {}
-        for proc in server.getAllProcessInfo():
+        procInfo = server.getAllProcessInfo()
+        for proc in procInfo:
             process = Process(self, proc)
             processes[process['uid']] = process
         return info
@@ -112,7 +139,7 @@ class Supervisor(dict):
         if self == info:
             this_p, info_p = self['processes'], info['processes']
             if this_p != info_p:
-                for name, process in info_p.items():
+                for name, process in list(info_p.items()):
                     if process != this_p[name]:
                         send(process, 'process_changed')
             self.update(info)
@@ -233,7 +260,7 @@ class Process(dict):
             self.update(args[0])
         self.update(kwargs)
         supervisor_name = supervisor['name']
-        full_name = self['group'] + ':' + self['name']
+        full_name = self.get('group', '') + ':' + self.get('name', '')
         uid = '{}:{}'.format(supervisor_name, full_name)
         self.log = log.getChild(uid)
         self.supervisor = weakref.proxy(supervisor)
@@ -340,7 +367,8 @@ def load_config(config_file):
 
 
 def send(payload, event):
-    louie.send(signal=event, sender='multivisor', payload=payload)
+    event_signal = signal(event)
+    return event_signal.send(event, payload=payload)
 
 
 def notification(message, level):
@@ -402,9 +430,9 @@ class Multivisor(object):
 
     @property
     def processes(self):
-        procs = (svisor['processes'] for svisor in self.supervisors.values())
+        procs = (svisor['processes'] for svisor in list(self.supervisors.values()))
         return { puid: proc for sprocs in procs
-                 for puid, proc in sprocs.items() }
+                 for puid, proc in list(sprocs.items()) }
 
     @property
     def use_authentication(self):
@@ -421,7 +449,7 @@ class Multivisor(object):
 
     def refresh(self):
         tasks = [spawn(supervisor.refresh)
-                 for supervisor in self.supervisors.values()]
+                 for supervisor in list(self.supervisors.values())]
         joinall(tasks)
 
     def get_supervisor(self, name):

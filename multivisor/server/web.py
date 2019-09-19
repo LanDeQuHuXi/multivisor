@@ -3,13 +3,16 @@ import hashlib
 import functools
 
 import gevent
+from blinker import signal
 from gevent.monkey import patch_all
+
+from multivisor.signals import SIGNALS
+
 patch_all(thread=False)
 
 import os
 import logging
 
-import louie
 from gevent import queue, sleep
 from gevent.pywsgi import WSGIServer
 from flask import Flask, render_template, Response, request, json, jsonify, session
@@ -57,7 +60,7 @@ def config_file_content():
 @app.route("/api/supervisor/update", methods=['POST'])
 @login_required(app)
 def update_supervisor():
-    names = (unicode.strip(supervisor)
+    names = (str.strip(supervisor)
              for supervisor in request.form['supervisor'].split(','))
     app.multivisor.update_supervisors(*names)
     return 'OK'
@@ -66,7 +69,7 @@ def update_supervisor():
 @app.route("/api/supervisor/restart", methods=['POST'])
 @login_required(app)
 def restart_supervisor():
-    names = (unicode.strip(supervisor)
+    names = (str.strip(supervisor)
              for supervisor in request.form['supervisor'].split(','))
     app.multivisor.restart_supervisors(*names)
     return 'OK'
@@ -75,7 +78,7 @@ def restart_supervisor():
 @app.route("/api/supervisor/reread", methods=['POST'])
 @login_required(app)
 def reread_supervisor():
-    names = (unicode.strip(supervisor)
+    names = (str.strip(supervisor)
              for supervisor in request.form['supervisor'].split(','))
     app.multivisor.reread_supervisors(*names)
     return 'OK'
@@ -84,7 +87,7 @@ def reread_supervisor():
 @app.route("/api/supervisor/shutdown", methods=['POST'])
 @login_required(app)
 def shutdown_supervisor():
-    names = (unicode.strip(supervisor)
+    names = (str.strip(supervisor)
              for supervisor in request.form['supervisor'].split(','))
     app.multivisor.shutdown_supervisors(*names)
     return 'OK'
@@ -210,13 +213,14 @@ class Dispatcher(object):
 
     def __init__(self):
         self.clients = []
-        louie.connect(self.on_multivisor_event, sender='multivisor')
+        for signal_name in SIGNALS:
+            signal(signal_name).connect(self.on_multivisor_event)
 
     def add_listener(self, client):
         self.clients.append(client)
 
     def remove_listener(self, client):
-        clients.clients.remove(client)
+        self.clients.remove(client)
 
     def on_multivisor_event(self, signal, payload):
         data = json.dumps(dict(payload=payload, event=signal))
