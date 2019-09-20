@@ -10,6 +10,18 @@ A centralized supervisor UI (Web & CLI)
 * Powerful filters
 * Interactive CLI
 
+## QICHAO'S NOTE
+
+* I pushed the python part of it to our own pypi enabling us to install it easily for our other projects.
+* This installation is necessary as Multivisor Dashboard relies on the supervisor processes to have 
+a specific rpc interface (see following) so the Dashboard can connect and get live updates. 
+```
+[rpcinterface:multivisor]
+supervisor.rpcinterface_factory = multivisor.rpc:make_rpc_interface
+bind=*:9051
+```
+* 
+
 ## Web interface
 
 ![multivisor on chrome desktop app mode](doc/multivisor_desktop.png)
