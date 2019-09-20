@@ -1,4 +1,4 @@
-flask
-gevent
-supervisor
+flask==1.1.1
+gevent==1.4.0
+supervisor==4.0.4
 six==1.12.0
